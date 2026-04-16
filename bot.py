@@ -15,16 +15,18 @@ from trainer_engine import TOPIC_LABELS, choose_topic, make_question, route_text
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
+VK_BOT_TOKEN="vk1.a.L2yJlZdhHFcsD-fXO4ZnwcWH1JdpdzV3XfW5HLsVPJAowB1YPxIEc7D9RvXtt6vgaVKX6RCrDeJQV_UWeF-MUPV9Vm9ddLZ9p6eLDaropDymSwy0zrhXwJ2rnOZZIN6N2JWfgtPiUn6HBGkaaZ-0tRnkO6mPLmRW3ktn0HZbaQlsF8MlHnmAwbSKTbDpj4tD9LJ8kGnwSNH7s6lQRthyjA"
+VK_GROUP_ID="237665030"
 
 def _token() -> str:
-    token = os.getenv("VK_BOT_TOKEN", "").strip()
+    token = VK_BOT_TOKEN
     if not token:
         raise RuntimeError("Не задан VK_BOT_TOKEN")
     return token
 
 
 def _group_id() -> int:
-    group_id = os.getenv("VK_GROUP_ID", "").strip()
+    group_id = VK_GROUP_ID
     if not group_id.isdigit():
         raise RuntimeError("Не задан VK_GROUP_ID (числовой id сообщества VK)")
     return int(group_id)
@@ -279,8 +281,9 @@ def handle_idle_message(vk, storage: Storage, user_id: int, text: str) -> None:
         send_message(
             vk,
             user_id,
-            "ЕГЭ-тренер по русскому готов к работе.\n"
-            "Выберите режим: `все`, `подборка 10`, `тема <id>`, `диагностика`.\n"
+            "Привет, это ЕГЭ-тренер по русскому и я уже готов к работе.\n"
+            "Чтобы начать тренировку выберите режим: `все`, `подборка 10`, `тема <id>`.\n"
+            "Для того чтобы получить диагностику своего уровня подготовки напишите: 'диагностика'`.\n"
             "Команда `темы` покажет список тем." + tip,
             keyboard=main_keyboard(),
         )
@@ -294,7 +297,7 @@ def handle_idle_message(vk, storage: Storage, user_id: int, text: str) -> None:
             "- `диагностика` - стартовый тест 15 заданий\n"
             "- `маршрут` - персональный план по темам\n"
             "- `все` - бесконечная смешанная тренировка\n"
-            "- `подборка N` - N заданий\n"
+            "- `подборка N` - N - номер задания\n"
             "- `тема <id>` - тренировка по конкретной теме\n"
             "- `статистика` - ваш прогресс\n"
             "- `стоп` - остановить текущую тренировку",
@@ -367,7 +370,7 @@ def run() -> None:
                         handle_answer(vk, storage, user_id, text, active)
                     else:
                         handle_idle_message(vk, storage, user_id, text)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     logging.exception("Ошибка обработки сообщения")
                     send_message(
                         vk,
@@ -379,7 +382,7 @@ def run() -> None:
                         raise
 
         except KeyboardInterrupt:
-            logging.info("Бот остановлен пользователем.")
+            logging.info("Бот остановлен.")
             break
         except RequestException as exc:
             logging.warning("Сетевая ошибка LongPoll: %s. Переподключение через 5 секунд.", exc)
