@@ -100,7 +100,7 @@ def format_question(payload: Dict) -> str:
 
     lines = [
         prefix + f"Тема: {TOPIC_LABELS.get(payload['topic'], payload['topic'])}",
-        f"Ориентир ЕГЭ: {payload['reference']}",
+        f"Ориентир ЕГЭ: {payload.get('reference', topic_reference(payload['topic']))}",
         payload["prompt"],
         "",
     ]
@@ -261,7 +261,8 @@ def _feedback(active: Dict, choice: int, is_correct: bool) -> str:
 def start_mode(vk, storage: Storage, user_id: int, mode: Dict) -> None:
     payload = build_question_payload(storage, user_id, mode)
     storage.set_active_question(user_id, payload)
-    storage.add_question_history(user_id, payload["signature"])
+    if payload.get("signature"):
+        storage.add_question_history(user_id, payload["signature"])
     send_message(vk, user_id, format_question(payload), keyboard=answer_keyboard(len(payload["options"])))
 
 
@@ -318,7 +319,8 @@ def handle_answer(vk, storage: Storage, user_id: int, text: str, active: Dict) -
 
     next_payload = build_question_payload(storage, user_id, mode)
     storage.set_active_question(user_id, next_payload)
-    storage.add_question_history(user_id, next_payload["signature"])
+    if next_payload.get("signature"):
+        storage.add_question_history(user_id, next_payload["signature"])
     send_message(
         vk,
         user_id,

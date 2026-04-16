@@ -23,8 +23,10 @@ class Storage:
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=10000")
         return conn
 
     def _column_exists(self, conn: sqlite3.Connection, table: str, column: str) -> bool:
@@ -77,6 +79,16 @@ class Storage:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS question_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    vk_id INTEGER NOT NULL,
+                    signature TEXT NOT NULL,
+                    asked_at TEXT NOT NULL
+                )
+                """
+            )
 
     def ensure_user(self, vk_id: int) -> None:
         with self._connect() as conn:
@@ -125,6 +137,35 @@ class Storage:
                 (vk_id, now, limit),
             ).fetchall()
         return [row["topic"] for row in rows]
+
+    def add_question_history(self, vk_id: int, signature: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO question_history(vk_id, signature, asked_at) VALUES (?, ?, ?)",
+                (vk_id, signature, datetime.utcnow().isoformat()),
+            )
+            conn.execute(
+                """
+                DELETE FROM question_history
+                WHERE id NOT IN (
+                    SELECT id FROM question_history WHERE vk_id = ? ORDER BY id DESC LIMIT 80
+                ) AND vk_id = ?
+                """,
+                (vk_id, vk_id),
+            )
+
+    def get_recent_signatures(self, vk_id: int, limit: int = 30) -> List[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT signature FROM question_history
+                WHERE vk_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (vk_id, limit),
+            ).fetchall()
+        return [row["signature"] for row in rows]
 
     def _update_review_schedule(self, conn: sqlite3.Connection, vk_id: int, topic: str, is_correct: bool) -> None:
         current = conn.execute(
