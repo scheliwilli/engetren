@@ -10,6 +10,20 @@ TOPIC_LABELS: Dict[str, str] = {
     "paronyms": "Паронимы",
 }
 
+FIPI_SOURCES = {
+    "demoversions": "https://fipi.ru/ege/demoversii-specifikacii-kodifikatory",
+    "open_bank": "https://fipi.ru/ege/otkrytyy-bank-zadaniy-ege",
+    "methodical": "https://fipi.ru/ege/analiticheskie-i-metodicheskie-materialy",
+}
+
+TOPIC_EGE_MAP = {
+    "stress": "Задание 4 (орфоэпические нормы)",
+    "paronyms": "Задание 5 (паронимы)",
+    "not_with_word": "Задание 13 (слитное/раздельное НЕ)",
+    "n_nn": "Задание 15 (Н/НН)",
+    "punct": "Задания 16-21 (пунктуация)",
+}
+
 
 @dataclass
 class Question:
@@ -18,6 +32,29 @@ class Question:
     options: List[str]
     answer_index: int
     explanation: str
+
+
+def question_signature(question: Question) -> str:
+    return f"{question.topic}|{question.prompt}"
+
+
+def topic_reference(topic: str) -> str:
+    return TOPIC_EGE_MAP.get(topic, "Тема ЕГЭ по русскому языку")
+
+
+def sources_text() -> str:
+    return (
+        "Официальные источники ФИПИ:\n"
+        f"- Демоверсии/кодификатор/спецификация: {FIPI_SOURCES['demoversions']}\n"
+        f"- Открытый банк заданий ЕГЭ: {FIPI_SOURCES['open_bank']}\n"
+        f"- Аналитические и методические материалы: {FIPI_SOURCES['methodical']}\n\n"
+        "Привязка тем тренажера:\n"
+        f"- {TOPIC_LABELS['stress']}: {TOPIC_EGE_MAP['stress']}\n"
+        f"- {TOPIC_LABELS['paronyms']}: {TOPIC_EGE_MAP['paronyms']}\n"
+        f"- {TOPIC_LABELS['not_with_word']}: {TOPIC_EGE_MAP['not_with_word']}\n"
+        f"- {TOPIC_LABELS['n_nn']}: {TOPIC_EGE_MAP['n_nn']}\n"
+        f"- {TOPIC_LABELS['punct']}: {TOPIC_EGE_MAP['punct']}"
+    )
 
 
 def _shuffle_options(options: List[str], correct_text: str) -> (List[str], int):
@@ -295,9 +332,10 @@ def _gen_paronyms(difficulty: int) -> Question:
 def topics_help_text() -> str:
     lines = ["Темы тренажёра:"]
     for key, label in TOPIC_LABELS.items():
-        lines.append(f"- {label}: команда `тема {key}`")
+        lines.append(f"- {label}: `тема {key}` или `выбрать тему {label.lower()}`")
     lines.append("- Диагностика уровня: `диагностика`")
-    lines.append("- Персональный маршрут: `маршрут`")
-    lines.append("- Смешанный режим: `все`")
-    lines.append("- Подборка: `подборка 10` (любое число)")
+    lines.append("- Персональный маршрут: `мой план`")
+    lines.append("- Смешанный режим: `тренировка`")
+    lines.append("- Подборка: `быстрый тест 10` (любое число)")
+    lines.append("- Официальные ссылки: `источники`")
     return "\n".join(lines)

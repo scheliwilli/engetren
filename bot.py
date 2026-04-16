@@ -11,7 +11,16 @@ from vk_api.exceptions import ApiError
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
 from storage import Storage
-from trainer_engine import TOPIC_LABELS, choose_topic, make_question, route_text, topics_help_text
+from trainer_engine import (
+    TOPIC_LABELS,
+    choose_topic,
+    make_question,
+    question_signature,
+    route_text,
+    sources_text,
+    topic_reference,
+    topics_help_text,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -34,14 +43,16 @@ def _group_id() -> int:
 
 def main_keyboard() -> str:
     kb = VkKeyboard(one_time=False, inline=False)
-    kb.add_button("Все", color=VkKeyboardColor.PRIMARY)
-    kb.add_button("Темы", color=VkKeyboardColor.SECONDARY)
+    kb.add_button("Тренировка", color=VkKeyboardColor.PRIMARY)
+    kb.add_button("Выбрать тему", color=VkKeyboardColor.SECONDARY)
     kb.add_line()
     kb.add_button("Диагностика", color=VkKeyboardColor.POSITIVE)
-    kb.add_button("Маршрут", color=VkKeyboardColor.SECONDARY)
+    kb.add_button("Мой план", color=VkKeyboardColor.SECONDARY)
     kb.add_line()
-    kb.add_button("Подборка 10", color=VkKeyboardColor.PRIMARY)
-    kb.add_button("Статистика", color=VkKeyboardColor.SECONDARY)
+    kb.add_button("Быстрый тест", color=VkKeyboardColor.PRIMARY)
+    kb.add_button("Прогресс", color=VkKeyboardColor.SECONDARY)
+    kb.add_line()
+    kb.add_button("Источники", color=VkKeyboardColor.SECONDARY)
     kb.add_line()
     kb.add_button("Помощь", color=VkKeyboardColor.SECONDARY)
     return kb.get_keyboard()
@@ -89,6 +100,7 @@ def format_question(payload: Dict) -> str:
 
     lines = [
         prefix + f"Тема: {TOPIC_LABELS.get(payload['topic'], payload['topic'])}",
+        f"Ориентир ЕГЭ: {payload['reference']}",
         payload["prompt"],
         "",
     ]
@@ -110,6 +122,24 @@ def _diagnostic_plan(total: int = 15) -> List[str]:
     return plan
 
 
+def _resolve_topic_key(raw_value: str) -> Optional[str]:
+    value = raw_value.strip().lower()
+    if value in TOPIC_LABELS:
+        return value
+
+    aliases = {
+        "нн": "n_nn",
+        "н/нн": "n_nn",
+        "н-нн": "n_nn",
+        "пунктуация": "punct",
+        "ударение": "stress",
+        "не": "not_with_word",
+        "не с частями речи": "not_with_word",
+        "паронимы": "paronyms",
+    }
+    return aliases.get(value)
+
+
 def _pick_topic(storage: Storage, user_id: int, mode: Dict) -> (str, bool):
     topic_stats = storage.get_topic_stats(user_id)
     if mode["type"] == "single":
@@ -129,7 +159,18 @@ def _pick_topic(storage: Storage, user_id: int, mode: Dict) -> (str, bool):
 def build_question_payload(storage: Storage, user_id: int, mode: Dict) -> Dict:
     topic_stats = storage.get_topic_stats(user_id)
     topic, is_review = _pick_topic(storage, user_id, mode)
+    recent = set(storage.get_recent_signatures(user_id, limit=30))
     q = make_question(topic, topic_stats)
+    signature = question_signature(q)
+
+    for _ in range(14):
+        if signature not in recent:
+            break
+        if mode["type"] in {"mixed", "diagnostic"}:
+            topic, is_review = _pick_topic(storage, user_id, mode)
+        q = make_question(topic, topic_stats)
+        signature = question_signature(q)
+
     return {
         "mode": mode,
         "topic": q.topic,
@@ -138,16 +179,21 @@ def build_question_payload(storage: Storage, user_id: int, mode: Dict) -> Dict:
         "answer_index": q.answer_index,
         "explanation": q.explanation,
         "is_review": is_review,
+        "signature": signature,
+        "reference": topic_reference(q.topic),
     }
 
 
 def parse_mode(text: str) -> Optional[Dict]:
     msg = text.strip().lower()
 
-    if msg in {"все", "all"}:
+    if msg in {"все", "all", "тренировка", "начать тренировку"}:
         return {"type": "mixed", "remaining": None}
 
-    if msg.startswith("подборка"):
+    if msg in {"быстрый тест", "тест"}:
+        return {"type": "mixed", "remaining": 10}
+
+    if msg.startswith("подборка") or msg.startswith("быстрый тест"):
         parts = msg.split()
         count = 10
         if len(parts) > 1 and parts[1].isdigit():
@@ -156,8 +202,17 @@ def parse_mode(text: str) -> Optional[Dict]:
 
     if msg.startswith("тема"):
         parts = msg.split(maxsplit=1)
-        if len(parts) == 2 and parts[1] in TOPIC_LABELS:
-            return {"type": "single", "topic": parts[1], "remaining": None}
+        if len(parts) == 2:
+            topic = _resolve_topic_key(parts[1])
+            if topic:
+                return {"type": "single", "topic": topic, "remaining": None}
+
+    if msg.startswith("выбрать тему"):
+        parts = msg.split(maxsplit=2)
+        if len(parts) == 3:
+            topic = _resolve_topic_key(parts[2])
+            if topic:
+                return {"type": "single", "topic": topic, "remaining": None}
 
     if msg == "диагностика":
         plan = _diagnostic_plan(15)
@@ -206,6 +261,7 @@ def _feedback(active: Dict, choice: int, is_correct: bool) -> str:
 def start_mode(vk, storage: Storage, user_id: int, mode: Dict) -> None:
     payload = build_question_payload(storage, user_id, mode)
     storage.set_active_question(user_id, payload)
+    storage.add_question_history(user_id, payload["signature"])
     send_message(vk, user_id, format_question(payload), keyboard=answer_keyboard(len(payload["options"])))
 
 
@@ -262,6 +318,7 @@ def handle_answer(vk, storage: Storage, user_id: int, text: str, active: Dict) -
 
     next_payload = build_question_payload(storage, user_id, mode)
     storage.set_active_question(user_id, next_payload)
+    storage.add_question_history(user_id, next_payload["signature"])
     send_message(
         vk,
         user_id,
@@ -281,10 +338,9 @@ def handle_idle_message(vk, storage: Storage, user_id: int, text: str) -> None:
         send_message(
             vk,
             user_id,
-            "Привет, это ЕГЭ-тренер по русскому и я уже готов к работе.\n"
-            "Чтобы начать тренировку выберите режим: `все`, `подборка 10`, `тема <id>`.\n"
-            "Для того чтобы получить диагностику своего уровня подготовки напишите: 'диагностика'`.\n"
-            "Команда `темы` покажет список тем." + tip,
+            "Привет. Это ЕГЭ-тренер по русскому.\n"
+            "Быстрый старт: `тренировка`, `быстрый тест 10`, `диагностика`, `выбрать тему`.\n"
+            "Список тем: `темы`. Официальные ссылки: `источники`." + tip,
             keyboard=main_keyboard(),
         )
         return
@@ -295,25 +351,30 @@ def handle_idle_message(vk, storage: Storage, user_id: int, text: str) -> None:
             user_id,
             "Команды:\n"
             "- `диагностика` - стартовый тест 15 заданий\n"
-            "- `маршрут` - персональный план по темам\n"
-            "- `все` - бесконечная смешанная тренировка\n"
-            "- `подборка N` - N - номер задания\n"
-            "- `тема <id>` - тренировка по конкретной теме\n"
-            "- `статистика` - ваш прогресс\n"
+            "- `мой план` или `маршрут` - персональный план по темам\n"
+            "- `тренировка` или `все` - бесконечная смешанная тренировка\n"
+            "- `быстрый тест N` или `подборка N` - серия из N заданий\n"
+            "- `выбрать тему <название>` или `тема <id>` - тренировка по теме\n"
+            "- `прогресс` или `статистика` - ваш прогресс\n"
+            "- `источники` - официальные материалы ФИПИ и привязка тем\n"
             "- `стоп` - остановить текущую тренировку",
             keyboard=main_keyboard(),
         )
         return
 
-    if msg == "темы":
+    if msg in {"темы", "выбрать тему"}:
         send_message(vk, user_id, topics_help_text(), keyboard=main_keyboard())
         return
 
-    if msg == "маршрут":
+    if msg in {"источники", "фипи"}:
+        send_message(vk, user_id, sources_text(), keyboard=main_keyboard())
+        return
+
+    if msg in {"маршрут", "мой план"}:
         send_message(vk, user_id, route_text(storage.get_topic_stats(user_id)), keyboard=main_keyboard())
         return
 
-    if msg == "статистика":
+    if msg in {"статистика", "прогресс"}:
         send_message(vk, user_id, stat_message(storage, user_id), keyboard=main_keyboard())
         return
 
