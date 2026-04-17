@@ -191,14 +191,14 @@ def parse_mode(text: str) -> Optional[Dict]:
         return {"type": "mixed", "remaining": None}
 
     if msg in {"быстрый тест", "тест"}:
-        return {"type": "mixed", "remaining": 10}
+        return {"type": "mixed", "remaining": 10, "correct": 0, "wrong": 0}
 
-    if msg.startswith("подборка") or msg.startswith("быстрый тест"):
+    if msg.startswith("подборка") or msg.startswith("быстрый тест") or msg.startswith("тест"):
         parts = msg.split()
         count = 10
-        if len(parts) > 1 and parts[1].isdigit():
-            count = max(1, min(100, int(parts[1])))
-        return {"type": "mixed", "remaining": count}
+        if parts and parts[-1].isdigit():
+            count = max(1, min(100, int(parts[-1])))
+        return {"type": "mixed", "remaining": count, "correct": 0, "wrong": 0}
 
     if msg.startswith("тема"):
         parts = msg.split(maxsplit=1)
@@ -302,6 +302,10 @@ def handle_answer(vk, storage: Storage, user_id: int, text: str, active: Dict) -
 
     mode = active["mode"]
     if mode.get("remaining") is not None:
+        if is_correct:
+            mode["correct"] = mode.get("correct", 0) + 1
+        else:
+            mode["wrong"] = mode.get("wrong", 0) + 1
         mode["remaining"] -= 1
         if mode["remaining"] <= 0:
             storage.clear_active_question(user_id)
@@ -309,10 +313,13 @@ def handle_answer(vk, storage: Storage, user_id: int, text: str, active: Dict) -
                 _finalize_diagnostic(vk, storage, user_id, text_result)
                 return
 
+            total = mode.get("correct", 0) + mode.get("wrong", 0)
+            accuracy = (mode.get("correct", 0) / total * 100) if total else 0.0
             send_message(
                 vk,
                 user_id,
-                text_result + "\n\nПодборка завершена!\n" + stat_message(storage, user_id),
+                text_result +
+                f"\n\nТест завершён: верно {mode.get('correct', 0)}, ошибок {mode.get('wrong', 0)}, точность {accuracy:.1f}%.",
                 keyboard=main_keyboard(),
             )
             return
